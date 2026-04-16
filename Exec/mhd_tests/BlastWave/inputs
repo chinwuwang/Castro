@@ -3,7 +3,7 @@ max_step = 5000
 stop_time = 0.02
 
 # PROBLEM SIZE & GEOMETRY
-geometry.is_periodic =  1    1    1
+geometry.is_periodic =  0    0    0
 geometry.coord_sys   =  0            # 0 => cart
 geometry.prob_lo     =  -0.5 -0.5 -0.5
 geometry.prob_hi     =   0.5  0.5  0.5
@@ -21,6 +21,11 @@ castro.hi_bc       =  2   2   2
 castro.do_hydro = 1
 castro.do_react = 0
 castro.ppm_type = 1
+
+castro.small_dens = 1.e-10
+castro.small_pres = 1.e-10
+castro.small_temp = 1.e-20
+eos.small_temp = 1.e-20
 
 castro.use_flattening = 1
 
@@ -40,7 +45,7 @@ amr.max_level       = 0       # maximum level number allowed
 amr.ref_ratio       = 2 2 2 2 # refinement ratio
 amr.regrid_int      = 2       # how often to regrid
 amr.blocking_factor = 8       # block factor in grid generation
-amr.max_grid_size   = 32
+amr.max_grid_size   = 200
 
 amr.refinement_indicators = denerr dengrad presserr pressgrad
 
@@ -66,8 +71,8 @@ amr.check_int       = 200       # number of timesteps between checkpoints
 
 # PLOTFILES
 amr.plot_file       = plt
-amr.plot_int        = 50
-amr.derive_plot_vars= density x_velocity y_velocity z_velocity eden Temp pressure B_x B_y B_z 
+amr.plot_int        = 500
+amr.derive_plot_vars= density x_velocity y_velocity z_velocity eden eint Temp pressure B_x B_y B_z 
 
 # PROBLEM PARAMETERS
 problem.r_init = 0.125

@@ -7,7 +7,7 @@ dens_ambient           real                 1.e0_rt                      y
 
 p_inner                real                 100.0_rt                     y
 
-temp_ambient           real                 -1.e2_rt                     y
+temp_ambient           real                 1.e0_rt                     y
 
 e_ambient              real                 0.0_rt
 

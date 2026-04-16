@@ -123,17 +123,9 @@ void problem_initialize_state_data (int i, int j, int k,
 
     state(i,j,k,UEINT) = eint;
 
-    // Calculate Magnetic Energy Density: Emag = 0.5 * B^2
-    Real Bx = problem::B_0 / std::sqrt(2.0_rt);
-    Real By = 0.0_rt;
-    Real Bz = problem::B_0 / std::sqrt(2.0_rt);
-    Real emag = 0.5_rt * (Bx*Bx + By*By + Bz*Bz);
-
     // Total Energy Density = Internal + Kinetic + Magnetic
     // Kinetic is 0 here since UMX, UMY, UMZ are 0
-    state(i,j,k,UEDEN) = eint + emag;
-
-    
+    state(i,j,k,UEDEN) = eint;
 
     // The temperature initialization will be done later
     // in the call to clean_state. We want to avoid
