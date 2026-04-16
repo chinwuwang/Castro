@@ -22,64 +22,6 @@ void problem_initialize ()
         }
     }
 
-    Real xn_zone[NumSpec] = {0.0};
-    xn_zone[0] = 1.0_rt;
-
-    eos_t eos_state;
-
-    // override the pressure with the temperature
-    if (problem::temp_ambient > 0.0_rt) {
-
-        eos_state.rho = problem::dens_ambient;
-        eos_state.T = problem::temp_ambient;
-        for (int n = 0; n < NumSpec; ++n) {
-            eos_state.xn[n] = xn_zone[n];
-        }
-
-        eos(eos_input_rt, eos_state);
-
-        problem::p_ambient = eos_state.p;
-
-    }
-
-    // Calculate ambient state data
-
-    eos_state.rho = problem::dens_ambient;
-    eos_state.p   = problem::p_ambient;
-    eos_state.T   = 1.e9_rt; // Initial guess for iterations
-    for (int n = 0; n < NumSpec; ++n) {
-        eos_state.xn[n] = xn_zone[n];
-    }
-
-    eos(eos_input_rp, eos_state);
-
-    problem::e_ambient = eos_state.e;
-    problem::temp_ambient = eos_state.T;
-
-    // set explosion pressure -- we will convert the point-explosion energy into
-    // a corresponding pressure distributed throughout the perturbed volume
-
-    Real vctr = 0.0;
-
-    if (coord_type == 0) {
-
-        // Spherical problem in Cartesian coordinates
-        vctr = (4.0_rt / 3.0_rt) * M_PI * problem::r_init * problem::r_init * problem::r_init;
-
-    }
-    else if (coord_type == 1) {
-
-        amrex::Abort("Sedov problem unsupported in 3D axisymmetric geometry.");
-
-    }
-    else if (coord_type == 2) {
-
-        amrex::Abort("Sedov problem unsupported in 3-D spherical geometry.");
-    
-    }
-
-    problem::e_exp = problem::exp_energy / vctr / problem::dens_ambient;
-
 }
 
 #endif

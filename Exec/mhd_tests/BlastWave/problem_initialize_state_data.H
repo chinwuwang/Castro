@@ -112,21 +112,28 @@ void problem_initialize_state_data (int i, int j, int k,
         }
     }
 
-    Real e_zone = (vol_pert * problem::e_exp + vol_ambient * problem::e_ambient) / (vol_pert + vol_ambient);
+    Real p_zone = (vol_pert * problem::p_inner + vol_ambient * problem::e_ambient) / (vol_pert + vol_ambient);
 
-    Real eint = problem::dens_ambient * e_zone;
+    Real eint = p_zone * 1.5_rt;
 
     state(i,j,k,URHO) = problem::dens_ambient;
     state(i,j,k,UMX) = 0.0_rt;
     state(i,j,k,UMY) = 0.0_rt;
     state(i,j,k,UMZ) = 0.0_rt;
 
-    state(i,j,k,UEDEN) = eint +
-                         0.5e0_rt * (state(i,j,k,UMX) * state(i,j,k,UMX) / state(i,j,k,URHO) +
-                                     state(i,j,k,UMY) * state(i,j,k,UMY) / state(i,j,k,URHO) +
-                                     state(i,j,k,UMZ) * state(i,j,k,UMZ) / state(i,j,k,URHO));
-
     state(i,j,k,UEINT) = eint;
+
+    // Calculate Magnetic Energy Density: Emag = 0.5 * B^2
+    Real Bx = problem::B_0 / std::sqrt(2.0_rt);
+    Real By = 0.0_rt;
+    Real Bz = problem::B_0 / std::sqrt(2.0_rt);
+    Real emag = 0.5_rt * (Bx*Bx + By*By + Bz*Bz);
+
+    // Total Energy Density = Internal + Kinetic + Magnetic
+    // Kinetic is 0 here since UMX, UMY, UMZ are 0
+    state(i,j,k,UEDEN) = eint + emag;
+
+    
 
     // The temperature initialization will be done later
     // in the call to clean_state. We want to avoid

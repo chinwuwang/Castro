@@ -21,9 +21,9 @@ void problem_initialize_mhd_data (int i, int j, int k,
     if (ibdir == 0) {
         B(i,j,k) = problem::B_0 / std::sqrt(2.0_rt);
     } else if (ibdir == 1) {
-        B(i,j,k) = problem::B_0 / std::sqrt(2.0_rt);
-    } else {
         B(i,j,k) = 0.0_rt;
+    } else {
+        B(i,j,k) = problem::B_0 / std::sqrt(2.0_rt);
     }
 }
 #endif

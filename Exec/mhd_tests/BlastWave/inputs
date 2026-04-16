@@ -1,13 +1,13 @@
 # ------------------  INPUTS TO MAIN PROGRAM  -------------------
 max_step = 5000
-stop_time = 0.01
+stop_time = 0.02
 
 # PROBLEM SIZE & GEOMETRY
-geometry.is_periodic =  0    0    0
+geometry.is_periodic =  1    1    1
 geometry.coord_sys   =  0            # 0 => cart
-geometry.prob_lo     =  0    0    0
-geometry.prob_hi     =  1    1    1
-amr.n_cell           =  32   32   32
+geometry.prob_lo     =  -0.5 -0.5 -0.5
+geometry.prob_hi     =   0.5  0.5  0.5
+amr.n_cell           =   200  200  200
 
 # >>>>>>>>>>>>>  BC FLAGS <<<<<<<<<<<<<<<<
 # 0 = Interior           3 = Symmetry
@@ -70,12 +70,13 @@ amr.plot_int        = 50
 amr.derive_plot_vars= density x_velocity y_velocity z_velocity eden Temp pressure B_x B_y B_z 
 
 # PROBLEM PARAMETERS
-problem.r_init = 0.01
-problem.p_ambient = 1.e-5
-problem.exp_energy = 1.0
+problem.r_init = 0.125
+problem.p_ambient = 1.0
+
+problem.p_inner = 100.0
 problem.dens_ambient = 1.0
 problem.nsub = 10
 
 # EOS
-eos.eos_gamma = 1.4e0
+eos.eos_gamma = 5./3.
 eos.eos_assume_neutral = 1
