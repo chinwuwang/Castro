@@ -112,7 +112,7 @@ void problem_initialize_state_data (int i, int j, int k,
         }
     }
 
-    Real p_zone = (vol_pert * problem::p_inner + vol_ambient * problem::e_ambient) / (vol_pert + vol_ambient);
+    Real p_zone = (vol_pert * problem::p_inner + vol_ambient * problem::p_ambient) / (vol_pert + vol_ambient);
 
     Real eint = p_zone * 1.5_rt;
 
