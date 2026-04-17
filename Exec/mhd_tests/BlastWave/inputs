@@ -7,7 +7,7 @@ geometry.is_periodic =  0    0    0
 geometry.coord_sys   =  0            # 0 => cart
 geometry.prob_lo     =  -0.5 -0.5 -0.5
 geometry.prob_hi     =   0.5  0.5  0.5
-amr.n_cell           =   200  200  200
+amr.n_cell           =   32   32   32
 
 # >>>>>>>>>>>>>  BC FLAGS <<<<<<<<<<<<<<<<
 # 0 = Interior           3 = Symmetry
@@ -16,6 +16,9 @@ amr.n_cell           =   200  200  200
 # >>>>>>>>>>>>>  BC FLAGS <<<<<<<<<<<<<<<<
 castro.lo_bc       =  2   2   2
 castro.hi_bc       =  2   2   2
+
+castro.max_subcycles = 20
+castro.limit_fluxes_on_small_dens = 1
 
 # WHICH PHYSICS
 castro.do_hydro = 1
@@ -29,7 +32,7 @@ castro.small_temp = 1.e-20
 castro.use_flattening = 1
 
 # TIME STEP CONTROL
-castro.cfl            = 0.5   # cfl number for hyperbolic system
+castro.cfl            = 0.2   # cfl number for hyperbolic system
 castro.init_shrink    = 0.01    # scale back initial timestep
 castro.change_max     = 1.1     # maximum increase in dt over successive steps
 
@@ -44,7 +47,7 @@ amr.max_level       = 0       # maximum level number allowed
 amr.ref_ratio       = 2 2 2 2 # refinement ratio
 amr.regrid_int      = 2       # how often to regrid
 amr.blocking_factor = 8       # block factor in grid generation
-amr.max_grid_size   = 200
+amr.max_grid_size   = 32
 
 amr.refinement_indicators = denerr dengrad presserr pressgrad
 
@@ -66,7 +69,7 @@ amr.refine.pressgrad.max_level = 3
 
 # CHECKPOINT FILES
 amr.check_file      = chk     # root name of checkpoint file
-amr.check_int       = 200       # number of timesteps between checkpoints
+amr.check_int       = 2500       # number of timesteps between checkpoints
 
 # PLOTFILES
 amr.plot_file       = plt
