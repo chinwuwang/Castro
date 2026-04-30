@@ -333,6 +333,9 @@ Castro::variableSetUp ()
     }
   }
 
+  amrex::Interpolater* face_interp = &amrex::face_linear_interp;
+  //amrex::Interpolater* face_interp = &amrex::face_divfree_interp;
+
   // Note that the default is state_data_extrap = false,
   // store_in_checkpoint = true.  We only need to put these in
   // explicitly if we want to do something different,
@@ -352,17 +355,17 @@ Castro::variableSetUp ()
   IndexType xface(IntVect{AMREX_D_DECL(1,0,0)});
   desc_lst.addDescriptor(Mag_Type_x, xface,
                          StateDescriptor::Point, 0, 1,
-                         interp, state_data_extrap,
+                         face_interp, state_data_extrap,
                          store_in_checkpoint);
   IndexType yface(IntVect{AMREX_D_DECL(0,1,0)});
   desc_lst.addDescriptor(Mag_Type_y, yface,
                          StateDescriptor::Point, 0, 1,
-                         interp, state_data_extrap,
+                         face_interp, state_data_extrap,
                          store_in_checkpoint);
   IndexType zface(IntVect{AMREX_D_DECL(0,0,1)});
   desc_lst.addDescriptor(Mag_Type_z, zface,
                          StateDescriptor::Point, 0, 1,
-                         interp, state_data_extrap,
+                         face_interp, state_data_extrap,
                          store_in_checkpoint);
 #endif
 
