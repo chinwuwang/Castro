@@ -1523,6 +1523,22 @@ Castro::init (AmrLevel &old)
 
 }
 
+#ifdef MHD
+struct MHDFillExtDir {
+    AMREX_GPU_DEVICE
+    void operator()(const amrex::IntVect& iv, amrex::Array4<amrex::Real> const& dest,
+                    const int dcomp, const int numcomp,
+                    amrex::GeometryData const& geom, const amrex::Real time,
+                    const amrex::BCRec* bcr, const int bcomp,
+                    const int orig_comp) const
+    {
+        // This is only called for external Dirichlet boundaries (EXT_DIR).
+        // Standard boundaries (periodic, symmetry, Neumann) are handled natively by AMReX.
+        // You can add custom magnetic field boundary logic here later if needed.
+    }
+};
+#endif
+
 //
 // This version inits the data on a new level that did not
 // exist before regridding.
@@ -1550,8 +1566,75 @@ Castro::init ()
     setTimeLevel(time,dt_old,dt);
 
     for (int s = 0; s < num_state_type; ++s) {
+
+        #ifdef MHD
+        if (s == Mag_Type_x || s == Mag_Type_y || s == Mag_Type_z) {
+            if (s == Mag_Type_x) {
+                
+                // 1. MUST BE amrex::Array, NOT amrex::Vector
+                amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM> fine_B {
+                    &get_new_data(Mag_Type_x), 
+                    &get_new_data(Mag_Type_y), 
+                    &get_new_data(Mag_Type_z)
+                };
+                
+                amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM> crse_B {
+                    &getLevel(level-1).get_new_data(Mag_Type_x),
+                    &getLevel(level-1).get_new_data(Mag_Type_y),
+                    &getLevel(level-1).get_new_data(Mag_Type_z)
+                };
+
+                // 2. Setup history vectors safely using push_back
+                amrex::Vector<amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM>> crse_data;
+                crse_data.push_back(crse_B);
+
+                amrex::Vector<amrex::Real> crse_time;
+                crse_time.push_back(time);
+                
+                amrex::Vector<amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM>> fine_data;
+                amrex::Vector<amrex::Real> fine_time;
+
+                // 3. Face BCRecs
+                amrex::Array<amrex::Vector<amrex::BCRec>, AMREX_SPACEDIM> bcs_B;
+                bcs_B[0] = Castro::get_desc_lst()[Mag_Type_x].getBCs();
+                bcs_B[1] = Castro::get_desc_lst()[Mag_Type_y].getBCs();
+                bcs_B[2] = Castro::get_desc_lst()[Mag_Type_z].getBCs();
+
+                // 4. Instantiate the Physical Boundary Condition Functors
+                using BndryFunc = amrex::PhysBCFunct<amrex::GpuBndryFuncFab<MHDFillExtDir>>;
+
+                amrex::Array<BndryFunc, AMREX_SPACEDIM> physbc_B_crse {
+                    BndryFunc(getLevel(level-1).geom, bcs_B[0], MHDFillExtDir{}),
+                    BndryFunc(getLevel(level-1).geom, bcs_B[1], MHDFillExtDir{}),
+                    BndryFunc(getLevel(level-1).geom, bcs_B[2], MHDFillExtDir{})
+                };
+
+                amrex::Array<BndryFunc, AMREX_SPACEDIM> physbc_B_fine {
+                    BndryFunc(geom, bcs_B[0], MHDFillExtDir{}),
+                    BndryFunc(geom, bcs_B[1], MHDFillExtDir{}),
+                    BndryFunc(geom, bcs_B[2], MHDFillExtDir{})
+                };
+
+                // 5. Call FillPatchTwoLevels
+                amrex::FillPatchTwoLevels(
+                    fine_B, time,
+                    crse_data, crse_time,
+                    fine_data, fine_time,
+                    0, 0, 1,          // scomp, dcomp, ncomp
+                    getLevel(level-1).geom, geom,       // Coarse geometry, Fine geometry
+                    physbc_B_crse, 0, physbc_B_fine, 0, // Coarse BCs, Fine BCs
+                    parent->refRatio(level-1),
+                    &amrex::face_divfree_interp, 
+                    bcs_B, 0
+                );
+            }
+            continue; 
+        }
+        #endif
+        
         MultiFab& state_MF = get_new_data(s);
         FillCoarsePatch(state_MF, 0, time, s, 0, state_MF.nComp(), state_MF.nGrow());
+        
     }
 }
 

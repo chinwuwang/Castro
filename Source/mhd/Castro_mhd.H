@@ -106,13 +106,5 @@
          amrex::Array4<amrex::Real> const& flx,
          const int dir);
 
-    void FillCoarsePatch(amrex::MultiFab& mf, 
-                         int dcomp, 
-                         amrex::Real time, 
-                         int index, 
-                         int scomp, 
-                         int ncomp, 
-                         int ngrow);
-
 
 #endif

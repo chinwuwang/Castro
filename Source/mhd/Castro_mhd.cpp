@@ -752,31 +752,3 @@ Castro::construct_ctu_mhd_source(Real time, Real dt)
     return status;
 }
 
-
-void Castro::FillCoarsePatch(amrex::MultiFab& mf, int dcomp, amrex::Real time, int index, int scomp, int ncomp, int ngrow)
-{
-  if (index == Mag_Type_x || index == Mag_Type_y || index == Mag_Type_z) {
-      Vector<MultiFab*> fine_B { &get_new_data(Mag_Type_x), 
-                                 &get_new_data(Mag_Type_y), 
-                                 &get_new_data(Mag_Type_z)};
-
-      Vector<MultiFab*> crse_B { &getLevel(level-1).get_new_data(Mag_Type_x), 
-                                 &getLevel(level-1).get_new_data(Mag_Type_y), 
-                                 &getLevel(level-1).get_new_data(Mag_Type_z)};
-
-      Vector<Vector<BCRec>> bcs_B(AMREX_SPACEDIM);
-
-      amrex::FillPatchTwoLevels(fine_B, time,
-                                {crse_B}, {time}, // Coarse data and time
-                                0, 0, 1,          // scomp, dcomp, ncomp
-                                geom, getLevel(level-1).geom, // Fine and coarse geometry
-                                physbc_B_fine, 0, physbc_B_crse, 0, // Your custom BC functors
-                                parent->refRatio(level-1),
-                                &amrex::face_divfree_interp, 
-                                bcs_B, 0);
-
-      return;
-  }
-
-  AmrLevel::FillCoarsePatch(mf, dcomp, time, index, scomp, ncomp, ngrow);
-}
