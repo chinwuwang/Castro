@@ -1592,7 +1592,10 @@ Castro::init ()
                 crse_time.push_back(time);
                 
                 amrex::Vector<amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM>> fine_data;
+                fine_data.push_back(fine_B);
+
                 amrex::Vector<amrex::Real> fine_time;
+                fine_time.push_back(time);
 
                 // 3. Face BCRecs
                 amrex::Array<amrex::Vector<amrex::BCRec>, AMREX_SPACEDIM> bcs_B;
@@ -2692,7 +2695,22 @@ Castro::FluxRegCrseInit() {
     Castro& fine_level = getLevel(level+1);
 
     for (int i = 0; i < AMREX_SPACEDIM; ++i) {
-      fine_level.flux_reg.CrseInit(*fluxes[i], i, 0, 0, NUM_STATE, flux_crse_scale);
+#ifdef MHD
+        // 1. Accumulate coarse fluxes BEFORE the magnetic fields
+        int num_comp_before_B = UMAGX;
+        if (num_comp_before_B > 0) {
+            fine_level.flux_reg.CrseInit(*fluxes[i], i, 0, 0, num_comp_before_B, flux_crse_scale);
+        }
+
+        // 2. Accumulate coarse fluxes AFTER the magnetic fields
+        int start_after_B = UMAGZ + 1;
+        int num_after_B = NUM_STATE - start_after_B;
+        if (num_after_B > 0) {
+            fine_level.flux_reg.CrseInit(*fluxes[i], i, start_after_B, start_after_B, num_after_B, flux_crse_scale);
+        }
+#else
+        fine_level.flux_reg.CrseInit(*fluxes[i], i, 0, 0, NUM_STATE, flux_crse_scale);
+#endif
     }
 
 #if (AMREX_SPACEDIM <= 2)
@@ -2722,7 +2740,22 @@ Castro::FluxRegFineAdd() {
     }
 
     for (int i = 0; i < AMREX_SPACEDIM; ++i) {
-      flux_reg.FineAdd(*fluxes[i], i, 0, 0, NUM_STATE, flux_fine_scale);
+#ifdef MHD
+        // 1. Accumulate fine fluxes BEFORE the magnetic fields
+        int num_comp_before_B = UMAGX;
+        if (num_comp_before_B > 0) {
+            flux_reg.FineAdd(*fluxes[i], i, 0, 0, num_comp_before_B, flux_fine_scale);
+        }
+
+        // 2. Accumulate fine fluxes AFTER the magnetic fields
+        int start_after_B = UMAGZ + 1;
+        int num_after_B = NUM_STATE - start_after_B;
+        if (num_after_B > 0) {
+            flux_reg.FineAdd(*fluxes[i], i, start_after_B, start_after_B, num_after_B, flux_fine_scale);
+        }
+#else
+        flux_reg.FineAdd(*fluxes[i], i, 0, 0, NUM_STATE, flux_fine_scale);
+#endif
     }
 
 #if (AMREX_SPACEDIM <= 2)
@@ -2945,7 +2978,23 @@ Castro::reflux (int crse_level, int fine_level, bool in_post_timestep)
 
         // Trigger the actual reflux on the coarse level now.
 
+#ifdef MHD
+        // 1. Reflux components BEFORE the magnetic field (e.g., URHO, UMX, UMY, UMZ, UEDEN)
+        int num_comp_before_B = UMAGX; 
+        if (num_comp_before_B > 0) {
+            reg->Reflux(crse_state, crse_lev.volume, 1.0, 0, 0, num_comp_before_B, crse_lev.geom);
+        }
+
+        // 2. Reflux components AFTER the magnetic field (e.g., passive scalars, isotopes)
+        int start_after_B = UMAGZ + 1;
+        int num_after_B = NUM_STATE - start_after_B;
+        if (num_after_B > 0) {
+            reg->Reflux(crse_state, crse_lev.volume, 1.0, start_after_B, start_after_B, num_after_B, crse_lev.geom);
+        }
+#else
+        // Standard hydrodynamics reflux
         reg->Reflux(crse_state, crse_lev.volume, 1.0, 0, 0, NUM_STATE, crse_lev.geom);
+#endif
 
         // Store the density change, for the gravity sync.
 
@@ -3207,16 +3256,43 @@ Castro::reflux (int crse_level, int fine_level, bool in_post_timestep)
 void
 Castro::avgDown ()
 {
-  BL_PROFILE("Castro::avgDown()");
+    BL_PROFILE("Castro::avgDown()");
 
-  if (level == parent->finestLevel()) {
-      return;
-  }
+    if (level == parent->finestLevel()) {
+        return;
+    }
 
-  for (int k = 0; k < num_state_type; k++) {
-      avgDown(k);
-  }
+    for (int k = 0; k < num_state_type; k++) {
+        #ifdef MHD
+        // Skip face-centered magnetic fields for the standard cell-centered average down
+        if (k == Mag_Type_x || k == Mag_Type_y || k == Mag_Type_z) {
+            continue;
+        }
+        #endif
+        
+        avgDown(k);
+    }
 
+    #ifdef MHD
+    /*
+    // Use the dedicated face-averaging routine to preserve div B = 0
+    Castro& fine_lev = getLevel(level+1);
+
+    amrex::Array<const amrex::MultiFab*, AMREX_SPACEDIM> fine_B {
+        &fine_lev.get_new_data(Mag_Type_x),
+        &fine_lev.get_new_data(Mag_Type_y),
+        &fine_lev.get_new_data(Mag_Type_z)
+    };
+
+    amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM> crse_B {
+        &get_new_data(Mag_Type_x),
+        &get_new_data(Mag_Type_y),
+        &get_new_data(Mag_Type_z)
+    };
+
+    amrex::average_down_faces(fine_B, crse_B, fine_ratio, geom);
+    */
+    #endif
 }
 
 void
@@ -4046,6 +4122,101 @@ Castro::check_div_B( MultiFab& Bx,
 
 
 }
+
+void
+Castro::FillPatchMHD(amrex::Real time, amrex::MultiFab& Bx, amrex::MultiFab& By, amrex::MultiFab& Bz, int ngrow)
+{
+    // Level 0 has no coarser level to interpolate from.
+    if (level == 0) {
+        AmrLevel::FillPatch(*this, Bx, ngrow, time, Mag_Type_x, 0, 1);
+        AmrLevel::FillPatch(*this, By, ngrow, time, Mag_Type_y, 0, 1);
+        AmrLevel::FillPatch(*this, Bz, ngrow, time, Mag_Type_z, 0, 1);
+        return;
+    }
+
+    auto& coarse_level = getLevel(level - 1);
+
+    // 1. Group the DESTINATION MultiFabs (The temporary arrays)
+    amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM> dest_B { &Bx, &By, &Bz };
+
+    // 2. Group the Coarse Source MultiFabs
+    amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM> crse_B_old {
+        &coarse_level.get_old_data(Mag_Type_x),
+        &coarse_level.get_old_data(Mag_Type_y),
+        &coarse_level.get_old_data(Mag_Type_z)
+    };
+    
+    amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM> crse_B_new {
+        &coarse_level.get_new_data(Mag_Type_x),
+        &coarse_level.get_new_data(Mag_Type_y),
+        &coarse_level.get_new_data(Mag_Type_z)
+    };
+
+    amrex::Vector<amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM>> crse_data;
+    amrex::Vector<amrex::Real> crse_time;
+
+    crse_data.push_back(crse_B_old);
+    crse_time.push_back(coarse_level.state[Mag_Type_x].prevTime());
+
+    crse_data.push_back(crse_B_new);
+    crse_time.push_back(coarse_level.state[Mag_Type_x].curTime());
+
+    // 3. Group the Fine Source MultiFabs (THIS WAS THE FIX)
+    amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM> fine_B_old {
+        &get_old_data(Mag_Type_x),
+        &get_old_data(Mag_Type_y),
+        &get_old_data(Mag_Type_z)
+    };
+    
+    amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM> fine_B_new {
+        &get_new_data(Mag_Type_x),
+        &get_new_data(Mag_Type_y),
+        &get_new_data(Mag_Type_z)
+    };
+
+    amrex::Vector<amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM>> fine_data;
+    amrex::Vector<amrex::Real> fine_time;
+    
+    fine_data.push_back(fine_B_old);
+    fine_time.push_back(state[Mag_Type_x].prevTime());
+
+    fine_data.push_back(fine_B_new);
+    fine_time.push_back(state[Mag_Type_x].curTime());
+
+    // 4. Setup Boundary Conditions
+    amrex::Array<amrex::Vector<amrex::BCRec>, AMREX_SPACEDIM> bcs_B;
+    bcs_B[0] = Castro::get_desc_lst()[Mag_Type_x].getBCs();
+    bcs_B[1] = Castro::get_desc_lst()[Mag_Type_y].getBCs();
+    bcs_B[2] = Castro::get_desc_lst()[Mag_Type_z].getBCs();
+
+    using BndryFunc = amrex::PhysBCFunct<amrex::GpuBndryFuncFab<MHDFillExtDir>>;
+
+    amrex::Array<BndryFunc, AMREX_SPACEDIM> physbc_B_crse {
+        BndryFunc(coarse_level.geom, bcs_B[0], MHDFillExtDir{}),
+        BndryFunc(coarse_level.geom, bcs_B[1], MHDFillExtDir{}),
+        BndryFunc(coarse_level.geom, bcs_B[2], MHDFillExtDir{})
+    };
+
+    amrex::Array<BndryFunc, AMREX_SPACEDIM> physbc_B_fine {
+        BndryFunc(geom, bcs_B[0], MHDFillExtDir{}),
+        BndryFunc(geom, bcs_B[1], MHDFillExtDir{}),
+        BndryFunc(geom, bcs_B[2], MHDFillExtDir{})
+    };
+
+    // 5. Execute Divergence-Free Interpolation into dest_B
+    amrex::FillPatchTwoLevels(
+        dest_B, time,                 // <--- Output goes here!
+        crse_data, crse_time,
+        fine_data, fine_time,         // <--- Valid source data comes from here!
+        0, 0, 1,
+        coarse_level.geom, geom,
+        physbc_B_crse, 0, physbc_B_fine, 0,
+        parent->refRatio(level-1),
+        &amrex::face_divfree_interp,
+        bcs_B, 0
+    );
+}
+
 #endif
 
 void

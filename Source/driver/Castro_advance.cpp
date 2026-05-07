@@ -155,9 +155,11 @@ Castro::initialize_do_advance (Real time, Real dt)
       By_old_tmp.define(By_old.boxArray(), By_old.DistributionMap(), 1, NUM_GROW);
       Bz_old_tmp.define(Bz_old.boxArray(), Bz_old.DistributionMap(), 1, NUM_GROW);
 
-      FillPatch(*this, Bx_old_tmp, NUM_GROW, time, Mag_Type_x, 0, 1);
-      FillPatch(*this, By_old_tmp, NUM_GROW, time, Mag_Type_y, 0, 1);
-      FillPatch(*this, Bz_old_tmp, NUM_GROW, time, Mag_Type_z, 0, 1);
+      FillPatchMHD(time, Bx_old_tmp, By_old_tmp, Bz_old_tmp, NUM_GROW);
+
+      //FillPatch(*this, Bx_old_tmp, NUM_GROW, time, Mag_Type_x, 0, 1);
+      //FillPatch(*this, By_old_tmp, NUM_GROW, time, Mag_Type_y, 0, 1);
+      //FillPatch(*this, Bz_old_tmp, NUM_GROW, time, Mag_Type_z, 0, 1);
 #endif
       // for the CTU unsplit method, we always start with the old
       // state note: although clean_state has already been done on

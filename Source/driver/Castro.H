@@ -1215,6 +1215,14 @@ protected:
    amrex::MultiFab Bx_old_tmp;
    amrex::MultiFab By_old_tmp;
    amrex::MultiFab Bz_old_tmp;
+
+
+    // Custom FillPatch for magnetic fields to ensure divergence-free ghost cells
+    void 
+    FillPatchMHD(amrex::Real time, 
+                        amrex::MultiFab& Bx, amrex::MultiFab& By, amrex::MultiFab& Bz, 
+                        int ngrow);
+
 #endif
 
 #ifdef RADIATION
@@ -1535,5 +1543,6 @@ Castro::using_point_mass ()
     return use_point_mass;
 }
 #endif
+
 
 #endif /*_Castro_H_*/
