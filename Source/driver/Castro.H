@@ -23,6 +23,7 @@ using namespace castro;
 #include <AMReX_iMultiFab.H>
 #include <AMReX_ErrorList.H>
 #include <AMReX_FluxRegister.H>
+#include <AMReX_EdgeFluxRegister.H>
 #include <network.H>
 #include <eos.H>
 #ifndef TRUE_SDC
@@ -1294,6 +1295,10 @@ protected:
 #endif
 #ifdef GRAVITY
     amrex::FluxRegister phi_reg;
+#endif
+#ifdef MHD
+        amrex::EdgeFluxRegister edge_flux_reg;
+        amrex::Array<std::unique_ptr<amrex::MultiFab>, AMREX_SPACEDIM> e_field;
 #endif
 
 ///

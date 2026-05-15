@@ -910,6 +910,9 @@ Castro::initMFs()
 
         flux_reg.define(grids, dmap, crse_ratio, level, NUM_STATE);
         flux_reg.setVal(0.0);
+#ifdef MHD
+        edge_flux_reg.define(grids, dmap, crse_ratio, level, 1);
+#endif
 
 #if (AMREX_SPACEDIM < 3)
         if (!Geom().IsCartesian()) {
