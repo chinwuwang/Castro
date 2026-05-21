@@ -7,7 +7,7 @@ geometry.is_periodic =  0    0    0
 geometry.coord_sys   =  0            # 0 => cart
 geometry.prob_lo     =  -0.5 -0.5 -0.5
 geometry.prob_hi     =   0.5  0.5  0.5
-amr.n_cell           =   32   32   32
+amr.n_cell           =   8    8    8
 
 # >>>>>>>>>>>>>  BC FLAGS <<<<<<<<<<<<<<<<
 # 0 = Interior           3 = Symmetry
@@ -19,6 +19,7 @@ castro.hi_bc       =  2   2   2
 
 castro.max_subcycles = 20
 castro.limit_fluxes_on_small_dens = 1
+#castro.do_reflux = 0
 
 # WHICH PHYSICS
 castro.do_hydro = 1
@@ -32,7 +33,6 @@ castro.small_temp = 1.e-20
 castro.use_flattening = 1
 
 # Turn on Dual Energy Formalism
-castro.use_dual_energy = 1
 castro.dual_energy_eta1 = 1.0e-4
 castro.dual_energy_eta2 = 1.0e-4
 
@@ -48,11 +48,12 @@ amr.v                 = 1       # verbosity in Amr.cpp
 #amr.grid_log         = grdlog  # name of grid logging file
 
 # REFINEMENT / REGRIDDING
-amr.max_level       = 0       # maximum level number allowed
+amr.max_level       = 3       # maximum level number allowed
 amr.ref_ratio       = 2 2 2 2 # refinement ratio
 amr.regrid_int      = 2       # how often to regrid
 amr.blocking_factor = 8       # block factor in grid generation
-amr.max_grid_size   = 32
+amr.max_grid_size   = 8
+#amr.subcycling_mode = None
 
 amr.refinement_indicators = denerr dengrad presserr pressgrad
 
@@ -78,7 +79,7 @@ amr.check_int       = 2500       # number of timesteps between checkpoints
 
 # PLOTFILES
 amr.plot_file       = plt
-amr.plot_int        = 500
+amr.plot_int        = 50
 amr.derive_plot_vars= density x_velocity y_velocity z_velocity eden Temp pressure B_x B_y B_z 
 
 # PROBLEM PARAMETERS
@@ -89,5 +90,5 @@ problem.dens_ambient = 1.0
 problem.nsub = 10
 
 # EOS
-eos.eos_gamma = 5./3.
+eos.eos_gamma = 1.67e0
 eos.eos_assume_neutral = 1

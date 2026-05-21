@@ -906,12 +906,36 @@ Castro::initMFs()
     }
 #endif
 
+#ifdef MHD
+        e_field.resize(3);
+
+        for (int dir = 0; dir < AMREX_SPACEDIM; ++dir) {
+            amrex::IntVect edge_type = amrex::IntVect::TheNodeVector();
+
+            if (dir < AMREX_SPACEDIM) {
+                edge_type[dir] = 0;
+            }
+
+            amrex::BoxArray edge_ba = amrex::convert(grids, edge_type);
+
+            e_field[dir] = std::make_unique<MultiFab>(MultiFab(edge_ba, dmap, 1, 0));
+    }
+
+#endif
+
     if (do_reflux && level > 0) {
 
         flux_reg.define(grids, dmap, crse_ratio, level, NUM_STATE);
         flux_reg.setVal(0.0);
 #ifdef MHD
-        edge_flux_reg.define(grids, dmap, crse_ratio, level, 1);
+        edge_flux_reg.define(grids, 
+                             parent->boxArray(level - 1), 
+                             dmap, 
+                             parent->DistributionMap(level - 1), 
+                             Geom(), 
+                             parent->Geom(level - 1), 
+                             1);
+        edge_flux_reg.reset();
 #endif
 
 #if (AMREX_SPACEDIM < 3)
@@ -1595,10 +1619,10 @@ Castro::init ()
                 crse_time.push_back(time);
                 
                 amrex::Vector<amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM>> fine_data;
-                fine_data.push_back(fine_B);
+                //fine_data.push_back(fine_B);
 
                 amrex::Vector<amrex::Real> fine_time;
-                fine_time.push_back(time);
+                //fine_time.push_back(time);
 
                 // 3. Face BCRecs
                 amrex::Array<amrex::Vector<amrex::BCRec>, AMREX_SPACEDIM> bcs_B;
@@ -2697,6 +2721,11 @@ Castro::FluxRegCrseInit() {
 
     Castro& fine_level = getLevel(level+1);
 
+#ifdef MHD
+    // FIX: Reset the edge flux register to prevent infinite accumulation
+    fine_level.edge_flux_reg.reset();
+#endif
+
     for (int i = 0; i < AMREX_SPACEDIM; ++i) {
 #ifdef MHD
         // 1. Accumulate coarse fluxes BEFORE the magnetic fields
@@ -2715,6 +2744,19 @@ Castro::FluxRegCrseInit() {
         fine_level.flux_reg.CrseInit(*fluxes[i], i, 0, 0, NUM_STATE, flux_crse_scale);
 #endif
     }
+
+#ifdef MHD
+    // 3. Accumulate coarse electric field into the edge flux register
+    // EdgeFluxRegister requires an MFIter and all 3 spatial components passed at once
+    for (amrex::MFIter mfi(*e_field[0]); mfi.isValid(); ++mfi) {
+        amrex::Array<const amrex::FArrayBox*, 3> e_arr{nullptr, nullptr, nullptr};
+        for (int i = 0; i < AMREX_SPACEDIM; ++i) {
+            e_arr[i] = &((*e_field[i])[mfi]);
+        }
+        // Note: Use CrseAdd instead of CrseInit
+        fine_level.edge_flux_reg.CrseAdd(mfi, e_arr, flux_crse_scale);
+    }
+#endif
 
 #if (AMREX_SPACEDIM <= 2)
     if (!Geom().IsCartesian()) {
@@ -2761,6 +2803,17 @@ Castro::FluxRegFineAdd() {
 #endif
     }
 
+#ifdef MHD
+    // 3. Accumulate the fine electric field into the edge flux register
+    for (amrex::MFIter mfi(*e_field[0]); mfi.isValid(); ++mfi) {
+        amrex::Array<const amrex::FArrayBox*, 3> e_arr{nullptr, nullptr, nullptr};
+        for (int i = 0; i < AMREX_SPACEDIM; ++i) {
+            e_arr[i] = &((*e_field[i])[mfi]);
+        }
+        edge_flux_reg.FineAdd(mfi, e_arr, flux_fine_scale);
+    }
+#endif
+
 #if (AMREX_SPACEDIM <= 2)
     if (!Geom().IsCartesian()) {
       getLevel(level).pres_reg.FineAdd(P_radial, 0, 0, 0, 1, pres_fine_scale);
@@ -2776,6 +2829,7 @@ Castro::FluxRegFineAdd() {
 #endif
 
 }
+
 
 // reflux() synchronizes fluxes between levels and has two modes of operation.
 //
@@ -2994,6 +3048,17 @@ Castro::reflux (int crse_level, int fine_level, bool in_post_timestep)
         if (num_after_B > 0) {
             reg->Reflux(crse_state, crse_lev.volume, 1.0, start_after_B, start_after_B, num_after_B, crse_lev.geom);
         }
+
+        // 3. Apply the edge flux register to the coarse face-centered magnetic fields
+        amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM> B_crse;
+        
+        // Fetch the face-centered B-fields directly from the coarse level's StateData
+        B_crse[0] = &crse_lev.get_new_data(Mag_Type_x);
+        B_crse[1] = &crse_lev.get_new_data(Mag_Type_y);
+        B_crse[2] = &crse_lev.get_new_data(Mag_Type_z);
+        
+        getLevel(lev).edge_flux_reg.Reflux(B_crse);
+        getLevel(lev).edge_flux_reg.reset();
 #else
         // Standard hydrodynamics reflux
         reg->Reflux(crse_state, crse_lev.volume, 1.0, 0, 0, NUM_STATE, crse_lev.geom);
@@ -3277,7 +3342,7 @@ Castro::avgDown ()
     }
 
     #ifdef MHD
-    /*
+    
     // Use the dedicated face-averaging routine to preserve div B = 0
     Castro& fine_lev = getLevel(level+1);
 
@@ -3294,7 +3359,7 @@ Castro::avgDown ()
     };
 
     amrex::average_down_faces(fine_B, crse_B, fine_ratio, geom);
-    */
+    
     #endif
 }
 
@@ -4170,22 +4235,22 @@ Castro::FillPatchMHD(amrex::Real time, amrex::MultiFab& Bx, amrex::MultiFab& By,
         &get_old_data(Mag_Type_y),
         &get_old_data(Mag_Type_z)
     };
-    
+    /*
     amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM> fine_B_new {
         &get_new_data(Mag_Type_x),
         &get_new_data(Mag_Type_y),
         &get_new_data(Mag_Type_z)
     };
-
+    */
     amrex::Vector<amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM>> fine_data;
     amrex::Vector<amrex::Real> fine_time;
     
     fine_data.push_back(fine_B_old);
     fine_time.push_back(state[Mag_Type_x].prevTime());
-
+    /*
     fine_data.push_back(fine_B_new);
     fine_time.push_back(state[Mag_Type_x].curTime());
-
+    */
     // 4. Setup Boundary Conditions
     amrex::Array<amrex::Vector<amrex::BCRec>, AMREX_SPACEDIM> bcs_B;
     bcs_B[0] = Castro::get_desc_lst()[Mag_Type_x].getBCs();
