@@ -152,7 +152,9 @@ Castro::initialize_do_advance (Real time, Real dt)
       MultiFab& Bz_old = get_old_data(Mag_Type_z);
 
       Bx_old_tmp.define(Bx_old.boxArray(), Bx_old.DistributionMap(), 1, NUM_GROW);
+
       By_old_tmp.define(By_old.boxArray(), By_old.DistributionMap(), 1, NUM_GROW);
+
       Bz_old_tmp.define(Bz_old.boxArray(), Bz_old.DistributionMap(), 1, NUM_GROW);
 
       FillPatchMHD(time, Bx_old_tmp, By_old_tmp, Bz_old_tmp, NUM_GROW);
@@ -567,6 +569,9 @@ Castro::initialize_advance(Real time, Real dt, int amr_iteration)
     for (int dir = 0; dir < 3; ++dir) {
         fluxes[dir]->setVal(0.0);
         mass_fluxes[dir]->setVal(0.0);
+#ifdef MHD
+        e_field[dir]->setVal(0.0);
+#endif
     }
 
 #if (AMREX_SPACEDIM <= 2)

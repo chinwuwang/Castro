@@ -297,8 +297,8 @@ Castro::construct_ctu_mhd_source(Real time, Real dt)
           hlld(bfz, qleft[2].array(), qright[2].array(), flxz1D_arr, 2);
 
 
-          // Prim to Cons
-
+          // Prim to cons
+          
           ux_left.resize(gbx, NUM_STATE+3);
           auto ux_left_arr = ux_left.array();
           auto elix_ux_left = ux_left.elixir();
@@ -621,6 +621,7 @@ Castro::construct_ctu_mhd_source(Real time, Real dt)
             [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
             {
               flux_arr(i,j,k,UTEMP) = 0.e0;
+              flux_arr(i,j,k,UEINT) = 0.e0;
 #ifdef SHOCK_VAR
               flux_arr(i,j,k,USHK) = 0.e0;
 #endif
@@ -694,6 +695,8 @@ Castro::construct_ctu_mhd_source(Real time, Real dt)
             Array4<Real> fluxes_fab = (*fluxes[idir]).array(mfi);
             const int numcomp = NUM_STATE;
 
+            Array4<Real const> const area_arr = area[idir].array(mfi);
+
             if (time_integration_method == SimplifiedSpectralDeferredCorrections) {
 
               AMREX_HOST_DEVICE_FOR_4D(mfi.nodaltilebox(idir), numcomp, i, j, k, n,
@@ -719,6 +722,33 @@ Castro::construct_ctu_mhd_source(Real time, Real dt)
             });
 
           } // idir loop
+
+          for (int idir = 0; idir < AMREX_SPACEDIM; idir++) {
+
+            Array4<Real> const E_fab = (E[idir]).array();
+            Array4<Real> e_fab = (*e_field[idir]).array(mfi);
+
+            Box ebox = amrex::convert(bx, e_field[idir]->ixType());
+
+            if (time_integration_method == SimplifiedSpectralDeferredCorrections) {
+
+              amrex::ParallelFor(ebox, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept 
+              {
+                e_fab(i,j,k) = E_fab(i,j,k);
+              });
+            
+            } else {
+
+              amrex::ParallelFor(ebox, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept 
+              {
+                e_fab(i,j,k) += E_fab(i,j,k);
+              });
+
+            }
+
+
+
+          }
 
         }
 
@@ -751,4 +781,3 @@ Castro::construct_ctu_mhd_source(Real time, Real dt)
 
     return status;
 }
-

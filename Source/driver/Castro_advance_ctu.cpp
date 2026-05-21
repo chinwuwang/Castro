@@ -197,6 +197,11 @@ Castro::retry_advance_ctu(Real dt, const advance_status& status)
             for (int dir = 0; dir < 3; ++dir) {
                 getLevel(lev).mass_fluxes[dir]->setVal(0.0);
             }
+#ifdef MHD
+            for (int dir = 0; dir < 3; ++dir) {
+                getLevel(lev).e_field[dir]->setVal(0.0);
+            }
+#endif
 
 #if (AMREX_SPACEDIM <= 2)
             if (!Geom().IsCartesian()) {

@@ -1298,7 +1298,7 @@ protected:
 #endif
 #ifdef MHD
         amrex::EdgeFluxRegister edge_flux_reg;
-        amrex::Array<std::unique_ptr<amrex::MultiFab>, AMREX_SPACEDIM> e_field;
+        amrex::Vector<std::unique_ptr<amrex::MultiFab> > e_field;
 #endif
 
 ///

@@ -2754,7 +2754,7 @@ Castro::FluxRegCrseInit() {
             e_arr[i] = &((*e_field[i])[mfi]);
         }
         // Note: Use CrseAdd instead of CrseInit
-        fine_level.edge_flux_reg.CrseAdd(mfi, e_arr, flux_crse_scale);
+        fine_level.edge_flux_reg.CrseAdd(mfi, e_arr, parent->dtLevel(level));
     }
 #endif
 
@@ -2810,7 +2810,7 @@ Castro::FluxRegFineAdd() {
         for (int i = 0; i < AMREX_SPACEDIM; ++i) {
             e_arr[i] = &((*e_field[i])[mfi]);
         }
-        edge_flux_reg.FineAdd(mfi, e_arr, flux_fine_scale);
+        edge_flux_reg.FineAdd(mfi, e_arr, parent->dtLevel(level));
     }
 #endif
 
@@ -3058,7 +3058,6 @@ Castro::reflux (int crse_level, int fine_level, bool in_post_timestep)
         B_crse[2] = &crse_lev.get_new_data(Mag_Type_z);
         
         getLevel(lev).edge_flux_reg.Reflux(B_crse);
-        getLevel(lev).edge_flux_reg.reset();
 #else
         // Standard hydrodynamics reflux
         reg->Reflux(crse_state, crse_lev.volume, 1.0, 0, 0, NUM_STATE, crse_lev.geom);
@@ -3079,6 +3078,9 @@ Castro::reflux (int crse_level, int fine_level, bool in_post_timestep)
         // We no longer need the flux register data, so clear it out.
 
         reg->setVal(0.0);
+#ifdef MHD
+        edge_flux_reg.reset();
+#endif
 
 #if (AMREX_SPACEDIM <= 2)
         if (!Geom().IsCartesian()) {
@@ -3334,33 +3336,30 @@ Castro::avgDown ()
         #ifdef MHD
         // Skip face-centered magnetic fields for the standard cell-centered average down
         if (k == Mag_Type_x || k == Mag_Type_y || k == Mag_Type_z) {
+            if (k == Mag_Type_x) {
+                Castro& fine_lev = getLevel(level+1);
+
+                amrex::Array<const amrex::MultiFab*, AMREX_SPACEDIM> fine_B {
+                    &fine_lev.get_new_data(Mag_Type_x),
+                    &fine_lev.get_new_data(Mag_Type_y),
+                    &fine_lev.get_new_data(Mag_Type_z)
+                };
+
+                amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM> crse_B {
+                    &get_new_data(Mag_Type_x),
+                    &get_new_data(Mag_Type_y),
+                    &get_new_data(Mag_Type_z)
+                };
+
+                amrex::average_down_faces(fine_B, crse_B, fine_ratio, geom);
+            }
             continue;
         }
+
         #endif
         
         avgDown(k);
     }
-
-    #ifdef MHD
-    
-    // Use the dedicated face-averaging routine to preserve div B = 0
-    Castro& fine_lev = getLevel(level+1);
-
-    amrex::Array<const amrex::MultiFab*, AMREX_SPACEDIM> fine_B {
-        &fine_lev.get_new_data(Mag_Type_x),
-        &fine_lev.get_new_data(Mag_Type_y),
-        &fine_lev.get_new_data(Mag_Type_z)
-    };
-
-    amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM> crse_B {
-        &get_new_data(Mag_Type_x),
-        &get_new_data(Mag_Type_y),
-        &get_new_data(Mag_Type_z)
-    };
-
-    amrex::average_down_faces(fine_B, crse_B, fine_ratio, geom);
-    
-    #endif
 }
 
 void
