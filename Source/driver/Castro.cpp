@@ -1503,6 +1503,22 @@ Castro::initData ()
     }
 }
 
+#ifdef MHD
+struct MHDFillExtDir {
+    AMREX_GPU_DEVICE
+    void operator()(const amrex::IntVect& iv, amrex::Array4<amrex::Real> const& dest,
+                    const int dcomp, const int numcomp,
+                    amrex::GeometryData const& geom, const amrex::Real time,
+                    const amrex::BCRec* bcr, const int bcomp,
+                    const int orig_comp) const
+    {
+        // This is only called for external Dirichlet boundaries (EXT_DIR).
+        // Standard boundaries (periodic, symmetry, Neumann) are handled natively by AMReX.
+        // You can add custom magnetic field boundary logic here later if needed.
+    }
+};
+#endif
+
 void
 Castro::init (AmrLevel &old)
 {
@@ -1520,6 +1536,66 @@ Castro::init (AmrLevel &old)
     setTimeLevel(cur_time,dt_old,dt_new);
 
     for (int s = 0; s < num_state_type; ++s) {
+
+#ifdef MHD
+        if (s == Mag_Type_x || s == Mag_Type_y || s == Mag_Type_z) {
+            if (s == Mag_Type_x) {   // fills all three components at once
+
+                amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM> fine_B {
+                    &get_new_data(Mag_Type_x),
+                    &get_new_data(Mag_Type_y),
+                    &get_new_data(Mag_Type_z) };
+
+                amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM> crse_B {
+                    &getLevel(level-1).get_new_data(Mag_Type_x),
+                    &getLevel(level-1).get_new_data(Mag_Type_y),
+                    &getLevel(level-1).get_new_data(Mag_Type_z) };
+
+                amrex::Vector<amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM>> crse_data{ crse_B };
+                amrex::Vector<amrex::Real> crse_time{ cur_time };
+
+                // include OLD fine data so already-evolved, div-free cells are
+                // copied; only newly refined cells are div-free interpolated.
+                amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM> old_fine_B {
+                    &oldlev->get_new_data(Mag_Type_x),
+                    &oldlev->get_new_data(Mag_Type_y),
+                    &oldlev->get_new_data(Mag_Type_z) };
+
+                amrex::Vector<amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM>> fine_data{ old_fine_B };
+                amrex::Vector<amrex::Real> fine_time{ cur_time };
+
+                amrex::Array<amrex::Vector<amrex::BCRec>, AMREX_SPACEDIM> bcs_B;
+                bcs_B[0] = Castro::get_desc_lst()[Mag_Type_x].getBCs();
+                bcs_B[1] = Castro::get_desc_lst()[Mag_Type_y].getBCs();
+                bcs_B[2] = Castro::get_desc_lst()[Mag_Type_z].getBCs();
+
+                using BndryFunc = amrex::PhysBCFunct<amrex::GpuBndryFuncFab<MHDFillExtDir>>;
+
+                amrex::Array<BndryFunc, AMREX_SPACEDIM> physbc_B_crse {
+                    BndryFunc(getLevel(level-1).geom, bcs_B[0], MHDFillExtDir{}),
+                    BndryFunc(getLevel(level-1).geom, bcs_B[1], MHDFillExtDir{}),
+                    BndryFunc(getLevel(level-1).geom, bcs_B[2], MHDFillExtDir{}) };
+
+                amrex::Array<BndryFunc, AMREX_SPACEDIM> physbc_B_fine {
+                    BndryFunc(geom, bcs_B[0], MHDFillExtDir{}),
+                    BndryFunc(geom, bcs_B[1], MHDFillExtDir{}),
+                    BndryFunc(geom, bcs_B[2], MHDFillExtDir{}) };
+
+                amrex::FillPatchTwoLevels(
+                    fine_B, cur_time,
+                    crse_data, crse_time,
+                    fine_data, fine_time,
+                    0, 0, 1,
+                    getLevel(level-1).geom, geom,
+                    physbc_B_crse, 0, physbc_B_fine, 0,
+                    parent->refRatio(level-1),
+                    &amrex::face_divfree_interp,
+                    bcs_B, 0);
+            }
+            continue;   // skip generic FillPatch for B
+        }
+#endif
+
         MultiFab& state_MF = get_new_data(s);
         FillPatch(old, state_MF, state_MF.nGrow(), cur_time, s, 0, state_MF.nComp());
         if (oldlev->state[s].hasOldData()) {
@@ -1532,39 +1608,14 @@ Castro::init (AmrLevel &old)
     }
 
     // Copy some other data we need from the old class.
-    // One reason this is necessary is if we are doing
-    // a post-timestep regrid -- then we're going to need
-    // to save information about whether there was a retry
-    // during the timestep.
-
-    iteration = oldlev->iteration;
-    sub_iteration = oldlev->sub_iteration;
-
-    sub_ncycle = oldlev->sub_ncycle;
-    dt_subcycle = oldlev->dt_subcycle;
-    dt_advance = oldlev->dt_advance;
-
+    iteration       = oldlev->iteration;
+    sub_iteration   = oldlev->sub_iteration;
+    sub_ncycle      = oldlev->sub_ncycle;
+    dt_subcycle     = oldlev->dt_subcycle;
+    dt_advance      = oldlev->dt_advance;
     keep_prev_state = oldlev->keep_prev_state;
-
-    in_retry = oldlev->in_retry;
-
+    in_retry        = oldlev->in_retry;
 }
-
-#ifdef MHD
-struct MHDFillExtDir {
-    AMREX_GPU_DEVICE
-    void operator()(const amrex::IntVect& iv, amrex::Array4<amrex::Real> const& dest,
-                    const int dcomp, const int numcomp,
-                    amrex::GeometryData const& geom, const amrex::Real time,
-                    const amrex::BCRec* bcr, const int bcomp,
-                    const int orig_comp) const
-    {
-        // This is only called for external Dirichlet boundaries (EXT_DIR).
-        // Standard boundaries (periodic, symmetry, Neumann) are handled natively by AMReX.
-        // You can add custom magnetic field boundary logic here later if needed.
-    }
-};
-#endif
 
 //
 // This version inits the data on a new level that did not
@@ -1583,88 +1634,72 @@ Castro::init ()
 
     Real time = cur_time;
 
-    // If we just triggered a regrid, we need to account for the fact that
-    // the data on the coarse level has already been advanced.
-
+    // If we just triggered a regrid, account for the coarse level
+    // having already been advanced.
     if (getLevel(level-1).post_step_regrid) {
-      time = prev_time;
+        time = prev_time;
     }
 
     setTimeLevel(time,dt_old,dt);
 
     for (int s = 0; s < num_state_type; ++s) {
 
-        #ifdef MHD
+#ifdef MHD
         if (s == Mag_Type_x || s == Mag_Type_y || s == Mag_Type_z) {
-            if (s == Mag_Type_x) {
-                
-                // 1. MUST BE amrex::Array, NOT amrex::Vector
+            if (s == Mag_Type_x) {   // fills all three components at once
+
                 amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM> fine_B {
-                    &get_new_data(Mag_Type_x), 
-                    &get_new_data(Mag_Type_y), 
-                    &get_new_data(Mag_Type_z)
-                };
-                
+                    &get_new_data(Mag_Type_x),
+                    &get_new_data(Mag_Type_y),
+                    &get_new_data(Mag_Type_z) };
+
                 amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM> crse_B {
                     &getLevel(level-1).get_new_data(Mag_Type_x),
                     &getLevel(level-1).get_new_data(Mag_Type_y),
-                    &getLevel(level-1).get_new_data(Mag_Type_z)
-                };
+                    &getLevel(level-1).get_new_data(Mag_Type_z) };
 
-                // 2. Setup history vectors safely using push_back
-                amrex::Vector<amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM>> crse_data;
-                crse_data.push_back(crse_B);
+                amrex::Vector<amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM>> crse_data{ crse_B };
+                amrex::Vector<amrex::Real> crse_time{ time };
 
-                amrex::Vector<amrex::Real> crse_time;
-                crse_time.push_back(time);
-                
+                // brand-new level: no prior fine data, interpolate everything
+                // from coarse (div-free).
                 amrex::Vector<amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM>> fine_data;
-                //fine_data.push_back(fine_B);
-
                 amrex::Vector<amrex::Real> fine_time;
-                //fine_time.push_back(time);
 
-                // 3. Face BCRecs
                 amrex::Array<amrex::Vector<amrex::BCRec>, AMREX_SPACEDIM> bcs_B;
                 bcs_B[0] = Castro::get_desc_lst()[Mag_Type_x].getBCs();
                 bcs_B[1] = Castro::get_desc_lst()[Mag_Type_y].getBCs();
                 bcs_B[2] = Castro::get_desc_lst()[Mag_Type_z].getBCs();
 
-                // 4. Instantiate the Physical Boundary Condition Functors
                 using BndryFunc = amrex::PhysBCFunct<amrex::GpuBndryFuncFab<MHDFillExtDir>>;
 
                 amrex::Array<BndryFunc, AMREX_SPACEDIM> physbc_B_crse {
                     BndryFunc(getLevel(level-1).geom, bcs_B[0], MHDFillExtDir{}),
                     BndryFunc(getLevel(level-1).geom, bcs_B[1], MHDFillExtDir{}),
-                    BndryFunc(getLevel(level-1).geom, bcs_B[2], MHDFillExtDir{})
-                };
+                    BndryFunc(getLevel(level-1).geom, bcs_B[2], MHDFillExtDir{}) };
 
                 amrex::Array<BndryFunc, AMREX_SPACEDIM> physbc_B_fine {
                     BndryFunc(geom, bcs_B[0], MHDFillExtDir{}),
                     BndryFunc(geom, bcs_B[1], MHDFillExtDir{}),
-                    BndryFunc(geom, bcs_B[2], MHDFillExtDir{})
-                };
+                    BndryFunc(geom, bcs_B[2], MHDFillExtDir{}) };
 
-                // 5. Call FillPatchTwoLevels
                 amrex::FillPatchTwoLevels(
                     fine_B, time,
                     crse_data, crse_time,
                     fine_data, fine_time,
-                    0, 0, 1,          // scomp, dcomp, ncomp
-                    getLevel(level-1).geom, geom,       // Coarse geometry, Fine geometry
-                    physbc_B_crse, 0, physbc_B_fine, 0, // Coarse BCs, Fine BCs
+                    0, 0, 1,
+                    getLevel(level-1).geom, geom,
+                    physbc_B_crse, 0, physbc_B_fine, 0,
                     parent->refRatio(level-1),
-                    &amrex::face_divfree_interp, 
-                    bcs_B, 0
-                );
+                    &amrex::face_divfree_interp,
+                    bcs_B, 0);
             }
-            continue; 
+            continue;   // skip generic FillCoarsePatch for B
         }
-        #endif
-        
+#endif
+
         MultiFab& state_MF = get_new_data(s);
         FillCoarsePatch(state_MF, 0, time, s, 0, state_MF.nComp(), state_MF.nGrow());
-        
     }
 }
 
@@ -2142,7 +2177,6 @@ Castro::post_timestep (int iteration_local)
     }
 
     // Ensure consistency with finer grids.
-
     if (level < finest_level) {
         avgDown();
     }
@@ -2754,7 +2788,7 @@ Castro::FluxRegCrseInit() {
             e_arr[i] = &((*e_field[i])[mfi]);
         }
         // Note: Use CrseAdd instead of CrseInit
-        fine_level.edge_flux_reg.CrseAdd(mfi, e_arr, parent->dtLevel(level));
+        fine_level.edge_flux_reg.CrseAdd(mfi, e_arr, 1.0);
     }
 #endif
 
@@ -2810,7 +2844,7 @@ Castro::FluxRegFineAdd() {
         for (int i = 0; i < AMREX_SPACEDIM; ++i) {
             e_arr[i] = &((*e_field[i])[mfi]);
         }
-        edge_flux_reg.FineAdd(mfi, e_arr, parent->dtLevel(level));
+        edge_flux_reg.FineAdd(mfi, e_arr, 1.0);
     }
 #endif
 
@@ -2978,6 +3012,8 @@ Castro::reflux (int crse_level, int fine_level, bool in_post_timestep)
                 bool scale_by_dAdt = false;
                 crse_lev.limit_hydro_fluxes_on_small_dens(nbx, idir, U, V, F, A, dt, scale_by_dAdt);
 #endif
+                Real lsmall_dens = castro::small_dens;
+
                 amrex::ParallelFor(nbx,
                 [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
                 {
@@ -3036,6 +3072,7 @@ Castro::reflux (int crse_level, int fine_level, bool in_post_timestep)
         // Trigger the actual reflux on the coarse level now.
 
 #ifdef MHD
+
         // 1. Reflux components BEFORE the magnetic field (e.g., URHO, UMX, UMY, UMZ, UEDEN)
         int num_comp_before_B = UMAGX; 
         if (num_comp_before_B > 0) {
@@ -3050,14 +3087,38 @@ Castro::reflux (int crse_level, int fine_level, bool in_post_timestep)
         }
 
         // 3. Apply the edge flux register to the coarse face-centered magnetic fields
+        
         amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM> B_crse;
         
         // Fetch the face-centered B-fields directly from the coarse level's StateData
         B_crse[0] = &crse_lev.get_new_data(Mag_Type_x);
         B_crse[1] = &crse_lev.get_new_data(Mag_Type_y);
         B_crse[2] = &crse_lev.get_new_data(Mag_Type_z);
-        
+
+        // snapshot B before the reflux
+        MultiFab dBx(B_crse[0]->boxArray(), B_crse[0]->DistributionMap(), 1, 0);
+        MultiFab dBy(B_crse[1]->boxArray(), B_crse[1]->DistributionMap(), 1, 0);
+        MultiFab dBz(B_crse[2]->boxArray(), B_crse[2]->DistributionMap(), 1, 0);
+        MultiFab::Copy(dBx, *B_crse[0], 0, 0, 1, 0);
+        MultiFab::Copy(dBy, *B_crse[1], 0, 0, 1, 0);
+        MultiFab::Copy(dBz, *B_crse[2], 0, 0, 1, 0);
+
         getLevel(lev).edge_flux_reg.Reflux(B_crse);
+
+        // dB = before - after, then take the max over cells (captures localized changes)
+        MultiFab::Subtract(dBx, *B_crse[0], 0, 0, 1, 0);
+        MultiFab::Subtract(dBy, *B_crse[1], 0, 0, 1, 0);
+        MultiFab::Subtract(dBz, *B_crse[2], 0, 0, 1, 0);
+        amrex::Print() << "  Reflux max|dBx|=" << dBx.norm0()
+                       << " max|dBy|=" << dBy.norm0()
+                       << " max|dBz|=" << dBz.norm0() << "\n";
+
+        for (int i = 0; i < AMREX_SPACEDIM; ++i) {
+            B_crse[i]->FillBoundary(crse_lev.geom.periodicity());
+        }
+
+        crse_lev.clean_state(*(B_crse[0]), *(B_crse[1]), *(B_crse[2]), crse_state, crse_lev.state[State_Type].curTime(), 0);
+        
 #else
         // Standard hydrodynamics reflux
         reg->Reflux(crse_state, crse_lev.volume, 1.0, 0, 0, NUM_STATE, crse_lev.geom);
@@ -3078,9 +3139,6 @@ Castro::reflux (int crse_level, int fine_level, bool in_post_timestep)
         // We no longer need the flux register data, so clear it out.
 
         reg->setVal(0.0);
-#ifdef MHD
-        edge_flux_reg.reset();
-#endif
 
 #if (AMREX_SPACEDIM <= 2)
         if (!Geom().IsCartesian()) {
@@ -3226,7 +3284,6 @@ Castro::reflux (int crse_level, int fine_level, bool in_post_timestep)
             Real dt_amr = parent->dtLevel(lev); // The full timestep expected by the Amr class.
 
             if (getLevel(lev).apply_sources()) {
-
                 getLevel(lev).apply_source_to_state(S_new, source, -dt_advance_local, 0);
                 getLevel(lev).clean_state(
 #ifdef MHD

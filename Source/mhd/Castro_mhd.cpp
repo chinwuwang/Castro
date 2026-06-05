@@ -701,14 +701,14 @@ Castro::construct_ctu_mhd_source(Real time, Real dt)
 
               AMREX_HOST_DEVICE_FOR_4D(mfi.nodaltilebox(idir), numcomp, i, j, k, n,
               {
-                fluxes_fab(i,j,k,n) = flux_fab(i,j,k,n);
+                fluxes_fab(i,j,k,n) = flux_fab(i,j,k,n) * area_arr(i,j,k) * dt;
               });
 
             } else {
 
               AMREX_HOST_DEVICE_FOR_4D(mfi.nodaltilebox(idir), numcomp, i, j, k, n,
               {
-                fluxes_fab(i,j,k,n) += flux_fab(i,j,k,n);
+                fluxes_fab(i,j,k,n) += flux_fab(i,j,k,n) * area_arr(i,j,k) * dt;
               });
 
             }
@@ -718,7 +718,7 @@ Castro::construct_ctu_mhd_source(Real time, Real dt)
 
             AMREX_HOST_DEVICE_FOR_4D(mfi.nodaltilebox(idir), 1, i, j, k, n,
             {
-              mass_fluxes_fab(i,j,k,0) = flux_fab(i,j,k,URHO);
+              mass_fluxes_fab(i,j,k,0) = flux_fab(i,j,k,URHO) * area_arr(i,j,k) * dt;
             });
 
           } // idir loop
@@ -734,14 +734,14 @@ Castro::construct_ctu_mhd_source(Real time, Real dt)
 
               amrex::ParallelFor(ebox, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept 
               {
-                e_fab(i,j,k) = E_fab(i,j,k);
+                e_fab(i,j,k) = E_fab(i,j,k) * dt;
               });
             
             } else {
 
               amrex::ParallelFor(ebox, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept 
               {
-                e_fab(i,j,k) += E_fab(i,j,k);
+                e_fab(i,j,k) += E_fab(i,j,k) * dt;
               });
 
             }
@@ -771,7 +771,7 @@ Castro::construct_ctu_mhd_source(Real time, Real dt)
     check_for_nan(S_new);
 
     // Perform reflux (for non-subcycling advances).
-
+    
     if (parent->subcyclingMode() == "None") {
         if (do_reflux == 1) {
             FluxRegCrseInit();
