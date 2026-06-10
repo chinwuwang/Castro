@@ -83,7 +83,7 @@ Castro::construct_ctu_mhd_source(Real time, Real dt)
 
       FArrayBox div;
 
-      for (MFIter mfi(S_new, TilingIfNotGPU()); mfi.isValid(); ++mfi)
+      for (MFIter mfi(S_new, false); mfi.isValid(); ++mfi)
         {
 
           const Box& bx = mfi.tilebox();
@@ -621,7 +621,6 @@ Castro::construct_ctu_mhd_source(Real time, Real dt)
             [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
             {
               flux_arr(i,j,k,UTEMP) = 0.e0;
-              flux_arr(i,j,k,UEINT) = 0.e0;
 #ifdef SHOCK_VAR
               flux_arr(i,j,k,USHK) = 0.e0;
 #endif

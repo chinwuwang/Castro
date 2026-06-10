@@ -1615,6 +1615,42 @@ Castro::init (AmrLevel &old)
     dt_advance      = oldlev->dt_advance;
     keep_prev_state = oldlev->keep_prev_state;
     in_retry        = oldlev->in_retry;
+
+    //remove
+    #ifdef MHD
+    // --- div(B) right after (re)initialization, BEFORE any advance ---
+    {
+        MultiFab& dBx = get_new_data(Mag_Type_x);
+        MultiFab& dBy = get_new_data(Mag_Type_y);
+        MultiFab& dBz = get_new_data(Mag_Type_z);
+        MultiFab& dS  = get_new_data(State_Type);
+
+        const auto dxv = geom.CellSizeArray();
+
+        ReduceOps<ReduceOpMax> reduce_op;
+        ReduceData<Real> reduce_data(reduce_op);
+        using ReduceTuple = typename decltype(reduce_data)::Type;
+
+        for (MFIter mfi(dS, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+            const Box& box = mfi.tilebox();
+            auto Bx_arr = dBx.array(mfi);
+            auto By_arr = dBy.array(mfi);
+            auto Bz_arr = dBz.array(mfi);
+            reduce_op.eval(box, reduce_data,
+            [=] AMREX_GPU_DEVICE (int i, int j, int k) -> ReduceTuple {
+                Real divB = (Bx_arr(i+1,j,k) - Bx_arr(i,j,k))/dxv[0] +
+                            (By_arr(i,j+1,k) - By_arr(i,j,k))/dxv[1] +
+                            (Bz_arr(i,j,k+1) - Bz_arr(i,j,k))/dxv[2];
+                return { std::abs(divB) };
+            });
+        }
+
+        Real mx = amrex::get<0>(reduce_data.value());
+        ParallelDescriptor::ReduceRealMax(mx);
+        amrex::Print() << "  [divB post-init] level " << level
+                       << "  max|divB| = " << mx << std::endl;
+    }
+#endif
 }
 
 //
@@ -1683,10 +1719,9 @@ Castro::init ()
                     BndryFunc(geom, bcs_B[1], MHDFillExtDir{}),
                     BndryFunc(geom, bcs_B[2], MHDFillExtDir{}) };
 
-                amrex::FillPatchTwoLevels(
+                amrex::InterpFromCoarseLevel(
                     fine_B, time,
-                    crse_data, crse_time,
-                    fine_data, fine_time,
+                    crse_B,
                     0, 0, 1,
                     getLevel(level-1).geom, geom,
                     physbc_B_crse, 0, physbc_B_fine, 0,
@@ -1701,6 +1736,41 @@ Castro::init ()
         MultiFab& state_MF = get_new_data(s);
         FillCoarsePatch(state_MF, 0, time, s, 0, state_MF.nComp(), state_MF.nGrow());
     }
+    
+    #ifdef MHD
+    // --- div(B) right after (re)initialization, BEFORE any advance ---
+    {
+        MultiFab& dBx = get_new_data(Mag_Type_x);
+        MultiFab& dBy = get_new_data(Mag_Type_y);
+        MultiFab& dBz = get_new_data(Mag_Type_z);
+        MultiFab& dS  = get_new_data(State_Type);
+
+        const auto dxv = geom.CellSizeArray();
+
+        ReduceOps<ReduceOpMax> reduce_op;
+        ReduceData<Real> reduce_data(reduce_op);
+        using ReduceTuple = typename decltype(reduce_data)::Type;
+
+        for (MFIter mfi(dS, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+            const Box& box = mfi.tilebox();
+            auto Bx_arr = dBx.array(mfi);
+            auto By_arr = dBy.array(mfi);
+            auto Bz_arr = dBz.array(mfi);
+            reduce_op.eval(box, reduce_data,
+            [=] AMREX_GPU_DEVICE (int i, int j, int k) -> ReduceTuple {
+                Real divB = (Bx_arr(i+1,j,k) - Bx_arr(i,j,k))/dxv[0] +
+                            (By_arr(i,j+1,k) - By_arr(i,j,k))/dxv[1] +
+                            (Bz_arr(i,j,k+1) - Bz_arr(i,j,k))/dxv[2];
+                return { std::abs(divB) };
+            });
+        }
+
+        Real mx = amrex::get<0>(reduce_data.value());
+        ParallelDescriptor::ReduceRealMax(mx);
+        amrex::Print() << "  [divB post-init] level " << level
+                       << "  max|divB| = " << mx << std::endl;
+    }
+#endif
 }
 
 Real
@@ -2788,7 +2858,8 @@ Castro::FluxRegCrseInit() {
             e_arr[i] = &((*e_field[i])[mfi]);
         }
         // Note: Use CrseAdd instead of CrseInit
-        fine_level.edge_flux_reg.CrseAdd(mfi, e_arr, 1.0);
+        Real dt_crse = state[Mag_Type_x].curTime() - state[Mag_Type_x].prevTime();
+        fine_level.edge_flux_reg.CrseAdd(mfi, e_arr, 1.0_rt);
     }
 #endif
 
@@ -2844,7 +2915,8 @@ Castro::FluxRegFineAdd() {
         for (int i = 0; i < AMREX_SPACEDIM; ++i) {
             e_arr[i] = &((*e_field[i])[mfi]);
         }
-        edge_flux_reg.FineAdd(mfi, e_arr, 1.0);
+        Real dt_fine = state[Mag_Type_x].curTime() - state[Mag_Type_x].prevTime();
+        edge_flux_reg.FineAdd(mfi, e_arr, 1.0_rt);
     }
 #endif
 
@@ -3023,15 +3095,17 @@ Castro::reflux (int crse_level, int fine_level, bool in_post_timestep)
                     Real drhoV = F(i,j,k,URHO) / V(i,j,k);
                     Real rhoInvNew = 1.0_rt / (rho + drhoV);
 
-                    for (int n = 0; n < NumSpec; ++n) {
-                        Real rhoX = U(i,j,k,UFS+n);
-                        Real drhoX = F(i,j,k,UFS+n) / V(i,j,k);
-                        Real XNew = (rhoX + AMREX_SPACEDIM * drhoX) * rhoInvNew;
+                    if (NumSpec > 1) {
+                        for (int n = 0; n < NumSpec; ++n) {
+                            Real rhoX = U(i,j,k,UFS+n);
+                            Real drhoX = F(i,j,k,UFS+n) / V(i,j,k);
+                            Real XNew = (rhoX + AMREX_SPACEDIM * drhoX) * rhoInvNew;
 
-                        if (XNew < -castro::abundance_failure_tolerance ||
-                            XNew > 1.0_rt + castro::abundance_failure_tolerance) {
-                            zero_fluxes = true;
-                            break;
+                            if (XNew < -castro::abundance_failure_tolerance ||
+                                XNew > 1.0_rt + castro::abundance_failure_tolerance) {
+                                zero_fluxes = true;
+                                break;
+                            }
                         }
                     }
 
