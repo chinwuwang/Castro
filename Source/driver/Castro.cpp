@@ -919,7 +919,7 @@ Castro::initMFs()
             amrex::BoxArray edge_ba = amrex::convert(grids, edge_type);
 
             e_field[dir] = std::make_unique<MultiFab>(MultiFab(edge_ba, dmap, 1, 0));
-    }
+        }
 
 #endif
 
@@ -1514,7 +1514,6 @@ struct MHDFillExtDir {
     {
         // This is only called for external Dirichlet boundaries (EXT_DIR).
         // Standard boundaries (periodic, symmetry, Neumann) are handled natively by AMReX.
-        // You can add custom magnetic field boundary logic here later if needed.
     }
 };
 #endif
@@ -1615,42 +1614,6 @@ Castro::init (AmrLevel &old)
     dt_advance      = oldlev->dt_advance;
     keep_prev_state = oldlev->keep_prev_state;
     in_retry        = oldlev->in_retry;
-
-    //remove
-    #ifdef MHD
-    // --- div(B) right after (re)initialization, BEFORE any advance ---
-    {
-        MultiFab& dBx = get_new_data(Mag_Type_x);
-        MultiFab& dBy = get_new_data(Mag_Type_y);
-        MultiFab& dBz = get_new_data(Mag_Type_z);
-        MultiFab& dS  = get_new_data(State_Type);
-
-        const auto dxv = geom.CellSizeArray();
-
-        ReduceOps<ReduceOpMax> reduce_op;
-        ReduceData<Real> reduce_data(reduce_op);
-        using ReduceTuple = typename decltype(reduce_data)::Type;
-
-        for (MFIter mfi(dS, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
-            const Box& box = mfi.tilebox();
-            auto Bx_arr = dBx.array(mfi);
-            auto By_arr = dBy.array(mfi);
-            auto Bz_arr = dBz.array(mfi);
-            reduce_op.eval(box, reduce_data,
-            [=] AMREX_GPU_DEVICE (int i, int j, int k) -> ReduceTuple {
-                Real divB = (Bx_arr(i+1,j,k) - Bx_arr(i,j,k))/dxv[0] +
-                            (By_arr(i,j+1,k) - By_arr(i,j,k))/dxv[1] +
-                            (Bz_arr(i,j,k+1) - Bz_arr(i,j,k))/dxv[2];
-                return { std::abs(divB) };
-            });
-        }
-
-        Real mx = amrex::get<0>(reduce_data.value());
-        ParallelDescriptor::ReduceRealMax(mx);
-        amrex::Print() << "  [divB post-init] level " << level
-                       << "  max|divB| = " << mx << std::endl;
-    }
-#endif
 }
 
 //
@@ -1736,41 +1699,6 @@ Castro::init ()
         MultiFab& state_MF = get_new_data(s);
         FillCoarsePatch(state_MF, 0, time, s, 0, state_MF.nComp(), state_MF.nGrow());
     }
-    
-    #ifdef MHD
-    // --- div(B) right after (re)initialization, BEFORE any advance ---
-    {
-        MultiFab& dBx = get_new_data(Mag_Type_x);
-        MultiFab& dBy = get_new_data(Mag_Type_y);
-        MultiFab& dBz = get_new_data(Mag_Type_z);
-        MultiFab& dS  = get_new_data(State_Type);
-
-        const auto dxv = geom.CellSizeArray();
-
-        ReduceOps<ReduceOpMax> reduce_op;
-        ReduceData<Real> reduce_data(reduce_op);
-        using ReduceTuple = typename decltype(reduce_data)::Type;
-
-        for (MFIter mfi(dS, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
-            const Box& box = mfi.tilebox();
-            auto Bx_arr = dBx.array(mfi);
-            auto By_arr = dBy.array(mfi);
-            auto Bz_arr = dBz.array(mfi);
-            reduce_op.eval(box, reduce_data,
-            [=] AMREX_GPU_DEVICE (int i, int j, int k) -> ReduceTuple {
-                Real divB = (Bx_arr(i+1,j,k) - Bx_arr(i,j,k))/dxv[0] +
-                            (By_arr(i,j+1,k) - By_arr(i,j,k))/dxv[1] +
-                            (Bz_arr(i,j,k+1) - Bz_arr(i,j,k))/dxv[2];
-                return { std::abs(divB) };
-            });
-        }
-
-        Real mx = amrex::get<0>(reduce_data.value());
-        ParallelDescriptor::ReduceRealMax(mx);
-        amrex::Print() << "  [divB post-init] level " << level
-                       << "  max|divB| = " << mx << std::endl;
-    }
-#endif
 }
 
 Real
@@ -2826,7 +2754,6 @@ Castro::FluxRegCrseInit() {
     Castro& fine_level = getLevel(level+1);
 
 #ifdef MHD
-    // FIX: Reset the edge flux register to prevent infinite accumulation
     fine_level.edge_flux_reg.reset();
 #endif
 
@@ -2857,8 +2784,7 @@ Castro::FluxRegCrseInit() {
         for (int i = 0; i < AMREX_SPACEDIM; ++i) {
             e_arr[i] = &((*e_field[i])[mfi]);
         }
-        // Note: Use CrseAdd instead of CrseInit
-        Real dt_crse = state[Mag_Type_x].curTime() - state[Mag_Type_x].prevTime();
+        
         fine_level.edge_flux_reg.CrseAdd(mfi, e_arr, 1.0_rt);
     }
 #endif
@@ -3161,7 +3087,6 @@ Castro::reflux (int crse_level, int fine_level, bool in_post_timestep)
         }
 
         // 3. Apply the edge flux register to the coarse face-centered magnetic fields
-        
         amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM> B_crse;
         
         // Fetch the face-centered B-fields directly from the coarse level's StateData
@@ -3169,28 +3094,7 @@ Castro::reflux (int crse_level, int fine_level, bool in_post_timestep)
         B_crse[1] = &crse_lev.get_new_data(Mag_Type_y);
         B_crse[2] = &crse_lev.get_new_data(Mag_Type_z);
 
-        // snapshot B before the reflux
-        MultiFab dBx(B_crse[0]->boxArray(), B_crse[0]->DistributionMap(), 1, 0);
-        MultiFab dBy(B_crse[1]->boxArray(), B_crse[1]->DistributionMap(), 1, 0);
-        MultiFab dBz(B_crse[2]->boxArray(), B_crse[2]->DistributionMap(), 1, 0);
-        MultiFab::Copy(dBx, *B_crse[0], 0, 0, 1, 0);
-        MultiFab::Copy(dBy, *B_crse[1], 0, 0, 1, 0);
-        MultiFab::Copy(dBz, *B_crse[2], 0, 0, 1, 0);
-
         getLevel(lev).edge_flux_reg.Reflux(B_crse);
-
-        // dB = before - after, then take the max over cells (captures localized changes)
-        MultiFab::Subtract(dBx, *B_crse[0], 0, 0, 1, 0);
-        MultiFab::Subtract(dBy, *B_crse[1], 0, 0, 1, 0);
-        MultiFab::Subtract(dBz, *B_crse[2], 0, 0, 1, 0);
-        amrex::Print() << "  Reflux max|dBx|=" << dBx.norm0()
-                       << " max|dBy|=" << dBy.norm0()
-                       << " max|dBz|=" << dBz.norm0() << "\n";
-
-        for (int i = 0; i < AMREX_SPACEDIM; ++i) {
-            B_crse[i]->FillBoundary(crse_lev.geom.periodicity());
-        }
-
         crse_lev.clean_state(*(B_crse[0]), *(B_crse[1]), *(B_crse[2]), crse_state, crse_lev.state[State_Type].curTime(), 0);
         
 #else
@@ -4365,22 +4269,13 @@ Castro::FillPatchMHD(amrex::Real time, amrex::MultiFab& Bx, amrex::MultiFab& By,
         &get_old_data(Mag_Type_y),
         &get_old_data(Mag_Type_z)
     };
-    /*
-    amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM> fine_B_new {
-        &get_new_data(Mag_Type_x),
-        &get_new_data(Mag_Type_y),
-        &get_new_data(Mag_Type_z)
-    };
-    */
+   
     amrex::Vector<amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM>> fine_data;
     amrex::Vector<amrex::Real> fine_time;
     
     fine_data.push_back(fine_B_old);
     fine_time.push_back(state[Mag_Type_x].prevTime());
-    /*
-    fine_data.push_back(fine_B_new);
-    fine_time.push_back(state[Mag_Type_x].curTime());
-    */
+   
     // 4. Setup Boundary Conditions
     amrex::Array<amrex::Vector<amrex::BCRec>, AMREX_SPACEDIM> bcs_B;
     bcs_B[0] = Castro::get_desc_lst()[Mag_Type_x].getBCs();
@@ -4403,9 +4298,9 @@ Castro::FillPatchMHD(amrex::Real time, amrex::MultiFab& Bx, amrex::MultiFab& By,
 
     // 5. Execute Divergence-Free Interpolation into dest_B
     amrex::FillPatchTwoLevels(
-        dest_B, time,                 // <--- Output goes here!
+        dest_B, time,                 
         crse_data, crse_time,
-        fine_data, fine_time,         // <--- Valid source data comes from here!
+        fine_data, fine_time,         
         0, 0, 1,
         coarse_level.geom, geom,
         physbc_B_crse, 0, physbc_B_fine, 0,
