@@ -2841,7 +2841,6 @@ Castro::FluxRegFineAdd() {
         for (int i = 0; i < AMREX_SPACEDIM; ++i) {
             e_arr[i] = &((*e_field[i])[mfi]);
         }
-        Real dt_fine = state[Mag_Type_x].curTime() - state[Mag_Type_x].prevTime();
         edge_flux_reg.FineAdd(mfi, e_arr, 1.0_rt);
     }
 #endif
